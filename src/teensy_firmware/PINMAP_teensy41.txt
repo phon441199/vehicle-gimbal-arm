@@ -1,0 +1,146 @@
+==========================================================================
+ GimbalArm — Teensy 4.1 PINMAP / WIRING  (2026-06-24)
+ Migration target from ESP32 D32 (arm_microros_esp32).
+ Pinmap ADOPTED from already-validated Teensy firmware:
+   - src/teensy_firmware/gimbal_arm_full/gimbal_arm_full.ino   (wrist motors, enc, IMU, current sense)
+   - src/teensy_firmware/ak40_can_test/AK40_Impedance_Multi/   (MIT-impedance over FlexCAN — CAN ref)
+ DO NOT invent new pins — wire to THIS table; firmware #defines must match it.
+==========================================================================
+
+NAMING
+  AK40 (CAN, QDD):   id1 = shoulder, id2 = elbow      -> MIT impedance mode
+  GM4108 (PWM,FOC):  WM1 = wrist_pitch, WM2 = wrist_roll
+  AS5048A:           ENC1 = pitch enc, ENC2 = roll enc (absolute, SPI, 14-bit, MODE1)
+  ICM20948:          cup IMU (leveling) — I2C
+
+--------------------------------------------------------------------------
+ TEENSY 4.1 PIN ASSIGNMENT                         (ESP32 D32 was -> )
+--------------------------------------------------------------------------
+ CAN1 (AK40 shoulder+elbow, 1 Mbps, FlexCAN_T4)
+   CTX1  = pin 22                                   (was GPIO5)
+   CRX1  = pin 23                                   (was GPIO33)
+   -> needs CAN transceiver (SN65HVD230) — REUSE existing. Teensy CAN pins are
+      logic-level only. 120ohm termination as before.
+
+ SPI0 (shared bus: ENC1 + ENC2 + cup IMU)   [SPI default bus]
+   SCK   = pin 13   (also onboard LED — flickers on SPI, harmless)  (was GPIO18)
+   MISO  = pin 12                                   (was GPIO19)
+   MOSI  = pin 11                                   (was GPIO23)
+   ENC1_CS (pitch)   = pin 9                         (was GPIO21)
+   ENC2_CS (roll)    = pin 10                        (was GPIO15)
+   IMU_CS  (ICM20948)= pin 8                         (was GPIO13)
+   NOTE: cup IMU STAYS on SPI (same proven read path as ESP32: srd2/~300Hz,
+         getAGMT direct). Same shared bus as D32 (SCK/MISO/MOSI + 3 CS) but on a
+         healthy board (the D32 GPIO22<->23 short that wrecked this bus is gone).
+
+ WM1  wrist_pitch  (GM4108, SimpleFOC BLDCDriver3PWM)
+   PWM_A = pin 0                                    (was GPIO25)
+   PWM_B = pin 1                                    (was GPIO26)
+   PWM_C = pin 2                                    (was GPIO27)
+   EN    = pin 3                                    (was GPIO14)
+
+ WM2  wrist_roll   (GM4108, SimpleFOC BLDCDriver3PWM)
+   PWM_A = pin 4                                    (was GPIO16)
+   PWM_B = pin 5                                    (was GPIO17)
+   PWM_C = pin 6                                    (was GPIO4)
+   EN    = pin 7                                    (was GPIO12 = ESP32 strapping pin = boot twitch!)
+
+ CURRENT SENSE (MKS board, shunt 0.01ohm, gain 50x)  [analog]
+   CS1_A = A0 (pin 14)                              (was GPIO36)
+   CS1_B = A1 (pin 15)                              (was GPIO39)
+   CS2_A = A2 (pin 16)                              (was GPIO34)
+   CS2_B = A3 (pin 17)                              (was GPIO32)
+   NOTE: Teensy ADC = 3.3V ref, set analogReadResolution(12) -> 0..4095.
+         Re-scale current-sense math (ESP32 used attenuated 0..4095). SimpleFOC
+         InlineCurrentSense voltage ref = 3.3V on Teensy.
+
+ cup IMU = ICM20948 on SPI (see SPI0 above, IMU_CS = pin 8). NOT I2C.
+
+ ADDED IMUs = 2x MPU6050  -> I2C (Wire)   [NEW for boot-absolute + transmissibility]
+   SDA = pin 18 (Wire)                              (Teensy Wire default)
+   SCL = pin 19 (Wire)
+   MPU6050 #1 (shoulder link): AD0 -> GND  => addr 0x68
+   MPU6050 #2 (elbow link):    AD0 -> 3V3  => addr 0x69
+   PURPOSE: gravity-referenced link tilt -> boot-absolute joint angles (shoulder/elbow).
+            Doubles as transmissibility (slosh) logging. MPU6050 is I2C-only.
+
+--------------------------------------------------------------------------
+ RESERVED / FREE
+--------------------------------------------------------------------------
+ Wire2 (pins 24=SDA2, 25=SCL2)  -> spare I2C (e.g. base IMU for transmissibility)
+ Free pins: 20, 21, 26..41, SD card slot (built-in, for logging)
+ Wire1 = 16/17 is taken by CS2_A/B (current sense); free it only if a 3rd I2C bus needed.
+
+--------------------------------------------------------------------------
+ PERIPHERAL / SAFETY NOTES
+--------------------------------------------------------------------------
+ * 5V INTOLERANT: Teensy 4.1 GPIO are 3.3V-only. NO 5V on any pin (kills it).
+   All current signals are 3.3V domain -> OK. Double-check MKS current-sense
+   output never exceeds 3.3V at max current.
+ * TEENSY DEATH PREVENTION (prior 3.3V short killed a Teensy): common GND between
+   Teensy / MKS driver / AK40 / supply; series R on exposed signal lines; clamp
+   if any line can spike. See memory project_teensy_death.
+ * No boot strapping pins -> NO boot/upload motor twitch (the ESP32 GPIO12 problem
+   on WM2 EN disappears). HalfKay bootloader doesn't toggle GPIO.
+ * micro-ROS transport = native USB Serial (set_microros_serial_transports(Serial)).
+   USB CDC ignores baud -> no 921600 stall, no serial-jitter divergence. Agent:
+   micro_ros_agent serial --dev /dev/ttyACM0   (Teensy enumerates as ttyACMx)
+ * SimpleFOC 3PWM: pins 0-2 and 4-6 work via analogWrite. If cogging from PWM
+   desync, move each motor's 3 phases onto one FlexPWM submodule.
+
+--------------------------------------------------------------------------
+ PORT CHECKLIST (firmware: new file arm_microros_teensy.ino, keep ESP32 as ref)
+--------------------------------------------------------------------------
+ [ ] CAN: driver/twai.h -> FlexCAN_T4 (CAN1, 1Mbps, FIFO, ACCEPT_ALL).
+         Reuse AK40_Impedance_Multi MIT pack/parse (theta_d/POS_ERR pattern).
+ [ ] Pins: replace all #defines per table above.
+ [ ] NVS (Preferences) -> EEPROM.h (offset persistence).
+ [ ] cup IMU: STAYS on SPI (CS=pin 8) — read path unchanged, no port needed.
+ [ ] ADD 2x MPU6050 on I2C Wire (0x68/0x69) -> link tilt for boot-absolute.
+ [ ] Current sense ADC: analogReadResolution(12), rescale.
+ [ ] Transport: set_microros_serial_transports(Serial).
+ [ ] CARRY OVER (pure logic, MCU-independent — copy from ESP32 arm_microros):
+       MIT gains (kp10/kp2_40/kd2_0.49), DOB (scale -0.43, bw 6.78, J),
+       WR_SIGN(-1)/WR_SIGN2(+1)/WR_GYRO2_SIGN(-1), complementary filter,
+       FOC cal (WR_CAL_ZERO 3.6877/WR2 3.5266, dir -1) + align-skip,
+       sector-snap auto-home, joint limits, telemetry (effort[5..10]).
+ [ ] Then: add link IMUs (Wire2) for boot-absolute joint angles.
+
+--------------------------------------------------------------------------
+ MKS DUAL FOC V3.2 Plus SOCKET  (Teensy wired to the ESP32-shield socket via dupont)
+--------------------------------------------------------------------------
+ Top header (13 pin, L->R):
+   1   2   3     4     5     6     7     8     9      10     11  12     13
+   GND  -  PhC1  PhB1  PhA1  PhC0  PhB0  PhA0  Cur1A  Cur1B   -  Cur0A  Cur0B
+ Bottom header (13 pin):
+   1    2    3-5   6   7    8     9     10    11    12   13
+   EN1  EN0   -    RX  TX  SCL1  SCL0  SDA1  SDA0   -   3.3V
+
+ Teensy -> MKS socket:
+   pin 0 -> PhA0 (top8)    pin 1 -> PhB0 (top7)    pin 2 -> PhC0 (top6)   pin 3 -> EN0 (bot2)
+   pin 4 -> PhA1 (top5)    pin 5 -> PhB1 (top4)    pin 6 -> PhC1 (top3)   pin 7 -> EN1 (bot1)
+   A0 -> Cur0A (top12)     A1 -> Cur0B (top13)     A2 -> Cur1A (top9)     A3 -> Cur1B (top10)
+   GND -> top1
+ NOTE: keep phase order A->A0,B->B0,C->C0 (same as ESP32) so FOC cal transfers.
+       Current-sense gain inverted in fw (gain_a*=-1; gain_b*=-1;). Shunt 10mohm, gain 50 (INA181A2).
+       MKS cap rated >=25V (20V bus). voltage_power_supply MUST match real bus.
+
+--------------------------------------------------------------------------
+ ENCODER + IMU HARNESS  (Cat5, T568B, ~70cm to wrist)  — MCU side = Teensy
+--------------------------------------------------------------------------
+   Cat5 pair | strand     | signal            | Teensy pin   (was ESP32)
+   orange    | orange     | SCK               | 13           (18)
+             | wh-orange  | GND               | GND
+   blue      | blue       | MISO              | 12           (19)
+             | wh-blue    | CS1 = enc1/pitch  | 9            (21)
+   green     | green      | MOSI              | 11           (23)
+             | wh-green   | CS3 = IMU (ICM)   | 8            (13)
+   brown     | wh-brown   | CS2 = enc2/roll   | 10           (15)
+             | brown      | 3V3               | 3.3V
+ NOTES:
+   - Only ONE GND strand -> STAR GROUND mandatory (motor return current must NOT
+     use this GND -> ground-offset killed a Teensy). Common GND + series R.
+   - Long run: keep SPI clock 1 MHz to start, raise if stable.
+   - Wrist-end IMU 20cm branch: orange=SCL(SCK) green=SDA(MOSI) blue=AD0(MISO)
+     wh-green=NCS brown=VCC wh-orange=GND. Decouple 1-10uF at 3V3.
+==========================================================================

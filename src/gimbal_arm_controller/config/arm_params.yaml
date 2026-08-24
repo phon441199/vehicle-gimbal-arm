@@ -1,0 +1,66 @@
+arm_controller:
+  ros__parameters:
+    joint_names:
+      - base_yaw
+      - shoulder
+      - elbow
+      - wrist_pitch
+      - wrist_roll
+
+    # 각 조인트 제한값 (라디안)
+    joint_limits:
+      base_yaw:
+        min: -3.14159
+        max:  3.14159
+      shoulder:
+        min: -1.5708
+        max:  1.5708
+      elbow:
+        min: -2.0944
+        max:  2.0944
+      wrist_pitch:
+        min: -0.7854
+        max:  0.7854
+      wrist_roll:
+        min: -0.7854
+        max:  0.7854
+
+    # 링크 기하 [m] -- analytic IK 용. PLACEHOLDER, DH 측정 후 교체.
+    # gimbalarm_description URDF / gimbalarm_lengths.yaml 와 동기화 유지.
+    #   h0 = L0_base_height + Ly_yaw_to_sh
+    #   l1 = upper arm, l2 = forearm, l_tool = L3_wrist + L4_tool
+    # DH 2026-06-15 (standard): h0=a0+a1=0.075, l_tool=a4=0.103.
+    # l1/l2 = 직접 재측정 0.362/0.313 (DH a2/a3=0.368 폐기, reach 0.744).
+    # NOTE: DH d2=54mm 횡방향 elbow offset 은 평면 2R IK 가 무시함 (TODO: RViz 검증/보정).
+    arm_geom:
+      h0:     0.075
+      l1:     0.362
+      l2:     0.313
+      l_tool: 0.103
+      elbow:  down      # IK 분기: 'up' 또는 'down'
+
+    # 미리 정의된 조인트 pose [rad] (JOINT_NAMES 순서). quintic 보간 대상.
+    # PLACEHOLDER -- 실제 자세 잡고 교체. [[project_ik_trajectory_plan]]
+    poses:
+      standby: [0.0,  0.5,  -0.7,  0.2,  0.0]   # 대기
+      receive: [0.3,  0.8,  -0.6, -0.2,  0.0]   # 물컵 받기
+      slosh:   [0.0,  0.6,  -0.4, -0.2,  0.0]   # 슬로싱 테스트
+    # pose 간 이동 기본 소요시간 [s]
+    move_time: 2.5
+
+# IK + quintic cartesian/named-pose 컨트롤러 (pose_controller_node)
+pose_controller:
+  ros__parameters:
+    arm_geom.h0:     0.075
+    arm_geom.l1:     0.362
+    arm_geom.l2:     0.313
+    arm_geom.l_tool: 0.103
+    arm_geom.elbow:  down
+    move_time:       2.5
+    rate_hz:         100.0
+    fake_hw:         true     # RViz 키네마틱 시뮬(모터 없음). 실HW=false.
+    cup_pitch:       0.0
+    cup_roll:        0.0
+    pose.standby: [0.0,  0.5,  -0.7,  0.2,  0.0]
+    pose.receive: [0.3,  0.8,  -0.6, -0.2,  0.0]
+    pose.slosh:   [0.0,  0.6,  -0.4, -0.2,  0.0]

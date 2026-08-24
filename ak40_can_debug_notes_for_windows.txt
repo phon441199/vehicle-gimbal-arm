@@ -1,0 +1,306 @@
+================================================================================
+  AK40-10 CAN 디버깅 노트 — CubeMars 공식 프로그램용 (Windows)
+  생성: 2026-05-18
+  배경: Ubuntu에서 Teensy 4.1 + FlexCAN_T4로 10시간 테스트 후
+        모터 펌웨어 무응답 또는 비표준 프로토콜 가능성 결론
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. 하드웨어 구성 (GimbalArm 5축 로봇 팔)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Joint 0: base_yaw    — 디지털 서보 35kg·cm (PWM, Teensy PIN=2)
+  Joint 1: shoulder    — AK40-10 QDD ★ (CAN, 미구현 상태)
+  Joint 2: elbow       — AK40-10 QDD ★ (CAN, 미구현 상태)
+  Joint 3: wrist_pitch — GM4108H-120T (SimpleFOC, MKS Dual FOC)
+  Joint 4: wrist_roll  — GM4108H-120T (SimpleFOC, MKS Dual FOC)
+
+  ★ = 이번 디버깅 대상
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. AK40-10 모터 스펙
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  제조사:       CubeMars
+  모델:         AK40-10 (QDD = Quasi-Direct Drive)
+  감속비:       10:1
+  폴 페어:      14 
+  최대 전류:    6A (peak), 4A (continuous)
+  정격 토크:    4.1 N·m
+  최대 속도:    38.7 rad/s (출력축)
+  CAN:          1Mbps (Extended Frame) — VESC 기반 Servo Mode (추정)
+  수량:         2개 (shoulder + elbow)
+  CAN ID:       모터1=1, 모터2=2 (CubeMars 프로그램에서 MIT펌웨어 디버그모드로 설정,
+                Servo모드에서는 ID 수정 기능 못 찾음. 초기화됐을 경우 0)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. CAN 하드웨어 배선
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Teensy 4.1 CAN1:
+    CTX (TX) = Pin 22 (GPIO_AD_B1_08, ALT2 = FLEXCAN1_TX)
+    CRX (RX) = Pin 23 (GPIO_AD_B1_09, ALT2 = FLEXCAN1_RX)
+
+  CAN 트랜시버: SN65HVD230 (3.3V)
+    Teensy Pin 22 → SN65HVD230 D (Tx)
+    Teensy Pin 23 → SN65HVD230 R (Rx)
+    SN65HVD230 CAN_H → 모터 CAN_H
+    SN65HVD230 CAN_L → 모터 CAN_L
+    종단저항: 트랜시버 내장 + R-Link 내장 → CAN_H-L 사이 60Ω 확인 (멀티미터)
+    → 별도 종단저항 불필요, 배선 문제 아님 (멀티미터로 전부 검증 완료)
+
+  AK40-10 모터 측:
+    CAN 커넥터: 4핀 단자 (CAN IN: LHHL, CAN OUT: LHHL)
+    테스트 시 연결:
+      모터 CAN IN → SN65HVD230 트랜시버 (Teensy)
+      모터 CAN OUT → R-Link (+ R-Link에 UART선도 연결, 안하면 CubeMars 프로그램에서 인식 불가)
+    USB-C 포트 → R-Link을 통한 UART 연결
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. Ubuntu에서 시도한 내용 및 결과 (10시간 테스트 요약)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  펌웨어 파일: src/teensy_firmware/ak40_can_test/ak40_can_test.ino
+  (Teensy 4.1 + FlexCAN_T4 라이브러리)
+
+  [테스트 1] SCAN / SCANALL — 0mA 전류 명령 후 상태 응답 대기
+    결과: 모터 NOT FOUND (두 모터 모두)
+
+  [테스트 2] LOOPBACK — Teensy 내부 CAN 루프백 테스트
+    결과: PASS (Teensy CAN 모듈 자체는 정상)
+    → 문제는 Teensy가 아니라 모터 측
+
+  [테스트 3] LISTEN — 10초간 모든 CAN 프레임 수신 대기
+    결과: 0 frames received
+    → 모터가 자동으로 status 브로드캐스트하지 않음
+
+  [테스트 4] PROTO — 10가지 프로토콜 포맷 자동 탐색
+    시도한 포맷:
+      1. VESC Extended (packet_type << 8 | id) — SET_CURRENT 0mA
+      2. CubeMars Extended (comm_type << 24 | id) — current loop
+      3. CubeMars bits[28:24]=1
+      4. Standard frame, ID = motor_id
+      5. MIT enter motor mode (STD) — 0xFF×7 + 0xFC
+      6. MIT enter motor mode (EXT) — 0xFF×7 + 0xFC
+      7. CubeMars read_params (comm_type=7)
+      8. Standard frame broadcast 0x7FF
+      9. VESC COMM_ALIVE via short buffer
+     10. CubeMars type=0 (get_info)
+    결과: 모든 포맷에서 (no response)
+
+  [테스트 5] TXTEST — 15초간 빠른 CAN 송신 burst
+    → 멀티미터로 CAN 라인 전압 변동 확인
+    결과: 모터 측 아무런 응답 없음
+
+  [테스트 6] PIN23 — FlexCAN 끄고 GPIO로 전환하여 트랜시버 RX 핀 활동 측정
+    결과: 모터 측 아무런 응답 없음
+
+  추가 시도: CubeMars 프로그램에서 R-Link 통해 모터에 명령 보내면서
+    Teensy 트랜시버로 CAN 버스 캡처 시도 — 이것도 무응답
+
+  [테스트 7] BAUD 500000 — 500kbps로 변경 후 재시도
+    결과: 여전히 무응답
+
+  [테스트 8] Full ID Scan (1-254) — 모든 CAN ID로 0mA 전송
+    결과: Found 0 motor(s)
+
+  ──────────────────────────────────────────────────────────────────
+  결론:
+    • Teensy CAN 내부 루프백은 정상 → CAN 컨트롤러 OK
+    • 모터가 어떤 프로토콜에도 응답하지 않음
+    • 배제된 원인:
+      ✗ 트랜시버 배선 — 멀티미터로 전부 검증, 종단저항 60Ω OK
+      ✗ 모터 전원 — 정상
+    • 남은 가능성:
+      ① 모터 펌웨어가 CAN 응답 불가 상태 (CubeMars 프로그램 UART로만 동작)
+      ② CAN 프로토콜이 VESC/MIT 표준과 다름 (CubeMars 독자 프로토콜?)
+      ③ R-Link UART 연결이 없으면 CAN도 동작 안 하는 구조?
+    • 펌웨어 히스토리:
+      - 처음: 모터 2개 모두 Servo 펌웨어
+      - 처음에 2개 연결 → 통신 안 돼서 → 1개만 계속 테스트
+      - 마지막에 테스트하던 1개를 MIT 모드로 변경 → 여전히 무응답
+    → CAN으로만 연결하면 CubeMars 프로그램에서도 인식 안 됨
+    → R-Link UART 연결 필수
+  ──────────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. CubeMars 공식 프로그램에서 확인해야 할 사항
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  도구: CubeMars R-Link + 공식 소프트웨어 (Windows)
+  연결: 모터 USB-C → R-Link → PC USB
+
+  [ ] 1. R-Link UART로 모터 연결 확인
+        - 시리얼 포트 선택, 통신 속성 확인
+        - 모터가 살아있는지 기본 상태 읽기
+
+  [ ] 2. 현재 모터 펌웨어 버전 확인
+        - Servo mode? MIT mode? 어떤 프로토콜로 설정되어 있는지
+
+  [ ] 3. CAN 설정 확인/변경
+        - CAN ID (현재 값 확인, 1/2로 설정)
+        - CAN baud rate (1Mbps인지 확인)
+        - CAN status 자동 송출 (auto broadcast) 활성화 여부
+
+  [ ] 4. 모터 제어 모드 확인
+        - Servo mode (VESC CAN 기반) vs MIT mode
+        - 전류 제어 가능 여부
+
+  [ ] 5. 기본 동작 테스트
+        - R-Link을 통해 직접 모터 회전시켜보기
+        - 전류/위치/속도 응답 확인
+
+  [ ] 6. (필요 시) 펌웨어 업데이트
+        - CubeMars 사이트에서 최신 펌웨어 다운로드
+
+  [ ] 7. CAN으로 전환 테스트
+        - R-Link으로 설정 완료 후
+        - CAN 인터페이스로 전환하여 Teensy에서 통신 재시도
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. 프로토콜 레퍼런스 (펌웨어에 구현된 것들)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  A) VESC Servo Mode (Extended CAN Frame)
+  ----------------------------------------
+  CAN ID = (packet_type << 8) | motor_id
+
+  명령:
+    SET_DUTY     = 0   → duty × 100000 (int32, big-endian)
+    SET_CURRENT  = 1   → current_mA (int32, big-endian)
+    SET_BRAKE    = 2   → brake_current_mA (int32, big-endian)
+    SET_RPM      = 3   → ERPM (int32, big-endian)
+    SET_POS      = 4   → position
+
+  응답 (모터→호스트, 자동 송출):
+    STATUS (type=9):    ERPM(int32) + Current(int16/10) + Duty(int16/1000)
+    STATUS_4 (type=16): Tfet + Tmotor + Iin + PidPos
+    STATUS_5 (type=27): Tachometer + Vin
+
+  B) MIT Mode (Standard CAN Frame, 8 byte)
+  ------------------------------------------
+  Enter motor mode: ID=motor_id, data = FF FF FF FF FF FF FF FC
+  Exit motor mode:  ID=motor_id, data = FF FF FF FF FF FF FF FD
+  Zero position:    ID=motor_id, data = FF FF FF FF FF FF FF FE
+
+  MIT control frame:
+    Byte 0-1: position (16-bit, -12.5~12.5 rad)
+    Byte 2-3: velocity (12-bit, -65~65 rad/s)
+    Byte 4:   Kp (12-bit, 0~500)
+    Byte 5-6: Kd (12-bit, 0~5)
+    Byte 7:   torque (12-bit, -18~18 N·m)
+
+  C) 기타 CubeMars 프로토콜 (추정, 미확인)
+  ------------------------------------------
+  comm_type << 24 | motor_id (Extended)
+  comm_type 0 = get_info
+  comm_type 1 = current loop
+  comm_type 6 = set CAN ID (?)
+  comm_type 7 = read params
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. Teensy 4.1 핀 배치 전체 (현재 할당)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Pin 0  → M0 A상 PWM (GM4108 #1, MKS 보드)
+  Pin 1  → M0 B상 PWM
+  Pin 2  → M0 C상 PWM / 또는 서보 base_yaw (펌웨어 따라 다름)
+  Pin 3  → M0 Enable
+  Pin 4  → M1 A상 PWM (GM4108 #2)
+  Pin 5  → M1 B상 PWM
+  Pin 6  → M1 C상 PWM
+  Pin 7  → M1 Enable
+  Pin 8  → 디지털 서보 PWM (base_yaw, gimbal_arm_firmware)
+  Pin 9  → AS5048A 엔코더 #1 CS (SPI)
+  Pin 10 → AS5048A 엔코더 #2 CS (SPI)
+  Pin 11 → SPI0 MOSI (엔코더 공유)
+  Pin 12 → SPI0 MISO (엔코더 공유)
+  Pin 13 → SPI0 SCK (엔코더 공유)
+  A0/14  → 전류센서 M0 A상 (Cur0A)
+  A1/15  → 전류센서 M0 B상 (Cur0B)
+  A2/16  → 전류센서 M1 A상 (Cur1A)
+  A3/17  → 전류센서 M1 B상 (Cur1B)
+  Pin 18 → I2C SDA (ICM20948 IMU)
+  Pin 19 → I2C SCL (ICM20948 IMU)
+  Pin 22 → CAN1 TX (AK40-10, SN65HVD230 트랜시버)
+  Pin 23 → CAN1 RX (AK40-10, SN65HVD230 트랜시버)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  8. GM4108 모터 측정 파라미터 (참고, wrist 조인트)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  이 파라미터들은 wrist 짐벌 모터(GM4108H)에 대한 것으로,
+  AK40-10과는 별개이지만 DOB 구현 시 함께 사용됨.
+
+  Motor 1 (wrist_pitch):
+    Phase R = 5.5 Ω (멀티미터 실측)
+    L = 0.34 mH (스텝 응답)
+    Kt = 0.154 N·m/A (연속 ramp + 선형회귀, 2026-05-15 측정)
+    Pole pairs = 11
+
+  Motor 2 (wrist_roll):
+    Phase R = 5.5 Ω
+    L = 0.38 mH
+    Kt = 0.138 N·m/A
+    Pole pairs = 11
+
+  전류센서: 션트 10mΩ, gain 50 (INA181A2)
+  엔코더: AS5048A SPI (14-bit, 16384 counts/rev)
+  SimpleFOC gain 반전 필요: gain_a *= -1; gain_b *= -1;
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  9. ROS2 / micro-ROS 환경 정보
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ROS2 버전: Jazzy
+  활성화: alias jazzy (conda 환경)
+  Domain ID: 5
+  micro-ROS agent:
+    ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -b 115200
+  토픽:
+    /imu/data       — sensor_msgs/msg/Imu (50Hz)
+    /joint_states   — sensor_msgs/msg/JointState
+    /motor_states   — sensor_msgs/msg/JointState (wrist 2축)
+    /motor_commands — std_msgs/msg/Float32MultiArray
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10. 남은 작업 목록 (AK40 해결 후)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. AK40-10 CAN 통신 확립 (이번 작업)
+  2. IMU 연결 (I2C 장거리 배선 해결 — 10kHz + 4.7kΩ 풀업)
+  3. DOB 외란관측기 구현 (GM4108 wrist 조인트)
+     - Kt=0.154/0.138, L=0.34/0.38, R=5.5 시작값
+  4. ROS 모드 전환 테스트
+  5. 슬로싱 컨트롤러 (Level1 PD → Level2 가속도FF → Level3 DOB)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  11. 펌웨어 파일 위치 (Ubuntu)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  워크스페이스: ~/gimbalarm_ws/
+
+  AK40 CAN 테스트:
+    src/teensy_firmware/ak40_can_test/ak40_can_test.ino
+    - FlexCAN_T4, 1Mbps, Extended frame
+    - SCAN/SCANALL/PROTO/LOOPBACK/LISTEN/TXTEST/PIN23 등 디버깅 명령
+
+  GM4108 모터 테스트 + IMU:
+    src/teensy_firmware/imu_test_firmware/imu_test_firmware.ino
+    - SimpleFOC, MOTOR_TEST_MODE / ROS_MODE 전환
+    - E/D/V/H/K/L/X/C/F 명령
+
+  5축 로봇 팔 ROS 펌웨어:
+    src/teensy_firmware/gimbal_arm_firmware/gimbal_arm_firmware.ino
+    - micro-ROS, JointState pub/sub
+    - shoulder/elbow CAN 드라이버 미구현 (TODO)
+
+  하드웨어 핀맵:
+    gimbalarm_hardware_teensypin.txt
+
+  모터 테스트 계획:
+    motor_test_plan.txt
+
+================================================================================
+  END OF NOTES
+================================================================================

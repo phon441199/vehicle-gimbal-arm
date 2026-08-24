@@ -1,0 +1,142 @@
+# GM4108 듀얼 BLDC 모터 테스트 + Kt 측정 펌웨어
+
+## Context
+
+GM4108H 짐벌 모터 2개를 MacroBase Dual FOC 3.2 Plus 드라이버에 연결하여 Teensy 4.1로 제어.
+기존 `imu_test_firmware.ino`에 SimpleFOC 기반 모터 드라이버 테스트 + Kt(토크 상수) 측정 기능을 추가한다.
+`#define` 모드 스위치로 MOTOR_TEST(serial) / ROS_MODE(micro-ROS) 전환.
+
+## 하드웨어 핀 매핑
+
+| 기능 | 핀 |
+|------|-----|
+| Motor CH1 PWM | 0, 1, 2 (A/B/C) |
+| Motor CH1 Enable | 3 |
+| Motor CH2 PWM | 4, 5, 6 (A/B/C) |
+| Motor CH2 Enable | 7 |
+| Encoder1 CS (AS5048A) | 9 |
+| Encoder2 CS (AS5048A) | 10 |
+| SPI (공통) | MOSI=11, MISO=12, SCK=13 |
+| Current Sensor 1 | A14, A15 (2-phase inline) |
+| Current Sensor 2 | A16, A17 (2-phase inline) |
+| IMU I2C | SDA=18, SCL=19 |
+
+## 전류센서 파라미터 (MacroBase Dual FOC 3.2 Plus)
+
+- 션트 저항: 1mΩ (0.001Ω)
+- 측정 범위: ±33A
+- 앰프 gain: 50 (33A × 0.001Ω × 50 = 1.65V = Vref/2)
+- 이득 오차: 1%
+- SimpleFOC: InlineCurrentSense(0.001f, 50.0f, pinA, pinB)
+
+## 구현 계획
+
+### 1. 라이브러리 추가
+- SimpleFOC 라이브러리 필요 (Arduino Library Manager 또는 수동 설치)
+- 기존 라이브러리 유지: micro_ros_arduino, ICM_20948, MadgwickAHRS
+
+### 2. 모드 스위치 구조
+
+  #define MOTOR_TEST_MODE   // 주석 토글로 모드 전환
+  // #define ROS_MODE
+
+  #include <SimpleFOC.h>
+  #ifdef ROS_MODE
+    #include <micro_ros_arduino.h>  // 기존 IMU + 모터 ROS 토픽
+  #endif
+
+### 3. SimpleFOC 객체 선언
+- BLDCMotor motor1(11), motor2(11) — GM4108H: 11 pole pairs
+- BLDCDriver3PWM driver1(0,1,2,3), driver2(4,5,6,7) — 3PWM + enable
+- MagneticSensorSPI encoder1(AS5048_SPI, 9), encoder2(AS5048_SPI, 10)
+- InlineCurrentSense cs1(0.001f, 50.0f, A14, A15), cs2(0.001f, 50.0f, A16, A17)
+
+### 4. setup_motors() 함수
+- 엔코더 init (SPI0 공유, CS 핀으로 구분)
+- 드라이버 설정: voltage_power_supply=12V, voltage_limit=6V (안전)
+- 모터 설정: voltage_limit=3V, current_limit=1A, velocity_limit=20 rad/s
+- 초기 제어모드: TorqueControlType::voltage (전류센서 캘리브레이션 전)
+- motor.init() → motor.initFOC() → motor.disable() (수동 활성화)
+
+### 5. MOTOR_TEST 모드 — Serial 명령 인터페이스
+
+| 명령 | 설명 |
+|------|------|
+| E1 / E2 | 모터 1/2 활성화 |
+| D1 / D2 | 모터 1/2 비활성화 |
+| V1 <volt> / V2 <volt> | 전압 타겟 설정 (예: V1 2.5) |
+| R | 전체 센서값 1회 읽기 (엔코더 각도/속도, 전류) |
+| M1 / M2 | 모터 1/2 연속 모니터링 토글 (10Hz) |
+| K1 / K2 | Kt 측정 루틴 실행 |
+| K1 <Vmax> <steps> <settle_ms> | Kt 커스텀 파라미터 |
+| S | 전체 정지 (emergency stop) |
+| ? | 도움말 |
+
+### 6. Kt 측정 루틴 (run_kt_test)
+
+원리: 무부하 정상상태에서 Vq = R·Iq + Ke·ω → Ke = (Vq - R·Iq) / ω
+BLDC에서 Kt = Ke (SI 단위)
+
+절차:
+1. 전압을 V_max/steps 단위로 단계적 증가
+2. 각 단계에서 settle_ms 동안 FOC 루프 실행 (정상상태 도달)
+3. 정상상태에서 50회 샘플링하여 Iq, ω 평균
+4. Ke = (Vq - R·Iq) / ω 계산
+5. CSV 형식으로 출력: Step, Vq, Iq, Id, Omega, Ke_est
+6. 완료 후 모터 정지
+
+### 7. ROS_MODE — micro-ROS 통합 (기존 IMU + 모터)
+- 기존 IMU 퍼블리셔 /imu/data 유지
+- 모터 상태 퍼블리셔 추가: /motor_states (JointState)
+- 모터 명령 구독자 추가: /motor_commands (Float32MultiArray)
+
+### 8. loop() 구조
+
+MOTOR_TEST 모드:
+  loop() {
+    process_serial_commands()
+    if (motor1.enabled) { motor1.loopFOC(); motor1.move(); }
+    if (motor2.enabled) { motor2.loopFOC(); motor2.move(); }
+    monitoring 출력 (10Hz)
+  }
+
+ROS_MODE:
+  loop() {
+    motor1.loopFOC(); motor1.move();
+    motor2.loopFOC(); motor2.move();
+    executor_spin_some()
+    IMU 읽기 + publish (50Hz)
+    motor state publish (50Hz)
+  }
+
+## 테스트 순서
+
+1. 엔코더 확인: R 명령으로 각도 읽기, 손으로 모터 돌려서 값 변화 확인
+2. 기본 구동: E1 → V1 0.5 → V1 1.0 → 모터 회전 확인 → D1
+3. 전류센서: R 명령으로 전류값 확인 (0A 오프셋, 구동 중 전류 변화)
+4. Kt 측정: K1 2.0 8 3000 → CSV 결과 확인
+5. 2번 모터 반복: E2, V2, K2 명령으로 동일 테스트
+6. ROS 모드 전환: #define ROS_MODE로 변경 후 리플래시, micro-ROS agent로 토픽 확인
+
+  전체 흐름:                                                
+  1. Teensy에 펌웨어 업로드
+  2. 도구 → 시리얼 모니터 열기 (115200, 줄바꿈 설정)                                                                                    
+  3. 시리얼 모니터에 부팅 메시지가 출력됨:          
+  ================================                                                                                                      
+   GM4108 Dual Motor Test Firmware                                                                                                      
+   MacroBase Dual FOC 3.2 Plus                                                                                                          
+  ================================                                                                                                      
+  IMU init... OK                                                                                                                        
+  Motors init... OK                                                                                                                     
+  Type ? for commands                                                                                                                   
+  4. 입력창에 명령어를 타이핑:                              
+    - ? → 명령어 목록 출력                                                                                                              
+    - R → 센서값 1회 읽기                                                                                                               
+    - E1 → Motor1 활성화                                                                                                                
+    - V1 0.5 → Motor1에 0.5V 인가                                                                                                       
+    - M1 → Motor1 실시간 모니터링 ON (10Hz로 각도/속도/전류 출력)                                                                       
+    - K1 2.0 8 3000 → Kt 측정 시작 (CSV 결과가 시리얼 모니터에 출력)
+      - L1 — Motor1 인덕턴스 측정 (기본 2V 스텝)                                                                                            
+  - L1 3.0 — 3V로 스텝 전압 변경                                                                                                        
+  - L2 — Motor2  
+    - S → 긴급 정지

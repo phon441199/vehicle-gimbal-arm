@@ -1,0 +1,29 @@
+# GimbalArm link lengths -- HUMAN REFERENCE / fill from DH measurement.
+# These mirror the xacro:property values in urdf/gimbalarm.urdf.xacro and the
+# arm_geom block in gimbal_arm_controller/config/arm_params.yaml.  Keep all
+# THREE in sync until unified (next session).  Units: meters.
+#
+# Measure axis-to-axis (center of one joint rotation axis to the next).
+#
+# TODO(DH): replace placeholders with measured values.
+# DH measurement 2026-06-15 (standard DH, drawn pose = zero):
+#   i  a[mm] alpha[deg] d[mm]
+#   0   17     0          0
+#   1   58   -90          0
+#   2  368     0         54   <- d2 = lateral elbow offset (along shoulder axis)
+#   3  368    90          0
+#   4  103   -90          0
+gimbalarm_lengths:
+  L0_base_height:   0.017  # base_link top  -> base_yaw axis   (DH a0, arbitrary base)
+  Ly_yaw_to_sh:     0.058  # base_yaw axis  -> shoulder axis    (DH a1)
+  L1_upper_arm:     0.409  # shoulder axis  -> elbow axis       (measured)
+  L2_forearm:       0.335  # elbow axis     -> wrist axis       (measured)
+  L3_wrist:         0.05   # wrist_pitch    -> wrist_roll axis  (split of DH a4)
+  L4_tool:          0.053  # wrist_roll     -> cup center       (L3+L4 = DH a4 = 0.103)
+  Loff_elbow:       0.054  # elbow lateral offset               (DH d2; analytic IK ignores)
+
+# Derived for IK (articulated 2R + base):
+#   h0 = L0_base_height + Ly_yaw_to_sh   (base -> shoulder height)
+#   l1 = L1_upper_arm
+#   l2 = L2_forearm
+#   l_tool = L3_wrist + L4_tool

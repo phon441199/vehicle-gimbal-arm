@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<robot name="gimbalarm" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- ====================================================================
+       GimbalArm 5-DOF.  Joint names MUST equal
+       gimbal_arm_controller/joint_config.py JOINT_NAMES so that
+       robot_state_publisher consumes /joint_states by name:
+         base_yaw (servo, Z) | shoulder (AK40, Y) | elbow (AK40, Y)
+         wrist_pitch (gimbal, Y) | wrist_roll (gimbal, Z)
+       Home pose = arm straight UP (+Z).  shoulder/elbow measured from +Z.
+
+       TODO(DH): the link lengths + joint AXES below are PLACEHOLDERS.  Replace
+       with measured geometry, then verify in RViz (joint_state_publisher_gui
+       sliders) before trusting.  Keep lengths in sync with
+       gimbal_arm_controller/config/arm_params.yaml -> arm_geom.
+       ==================================================================== -->
+
+  <!-- link lengths [m]  (from DH measurement 2026-06-15, standard DH) -->
+  <!-- DH a[mm]: 17, 58, 368, 368, 103 ; alpha[deg]: 0, -90, 0, 90, -90 ; d2=54 -->
+  <xacro:property name="L0"  value="0.017"/>  <!-- base_link top -> base_yaw axis  (DH a0, arbitrary base) -->
+  <xacro:property name="Ly"  value="0.058"/>  <!-- base_yaw -> shoulder axis        (DH a1) -->
+  <xacro:property name="L1"  value="0.362"/>  <!-- shoulder -> elbow  (upper arm)   (0.409 - 47mm cut) -->
+  <xacro:property name="L2"  value="0.313"/>  <!-- elbow -> wrist     (forearm)     (0.335 - 22mm cut) -->
+  <xacro:property name="L3"  value="0.05"/>   <!-- wrist_pitch -> wrist_roll        (split of DH a4) -->
+  <xacro:property name="L4"  value="0.053"/>  <!-- wrist_roll -> cup center (tool)  (L3+L4 = DH a4 = 0.103) -->
+  <xacro:property name="Loff" value="0.054"/> <!-- elbow lateral offset along shoulder axis (DH d2) -->
+  <xacro:property name="rr"  value="0.012"/>  <!-- visual cylinder radius           -->
+
+  <!-- shared joint dynamics limits -->
+  <xacro:property name="vL" value="3.0"/>     <!-- velocity limit [rad/s] -->
+  <xacro:property name="eL" value="18.0"/>    <!-- effort   limit [Nm]    -->
+
+  <material name="grey"><color rgba="0.55 0.55 0.58 1"/></material>
+  <material name="blu"><color rgba="0.20 0.45 0.90 1"/></material>
+  <material name="cup"><color rgba="0.90 0.70 0.10 1"/></material>
+
+  <!-- a cylinder of length 'seglen' grown along +Z from the link origin -->
+  <xacro:macro name="seg" params="seglen mat">
+    <visual>
+      <origin xyz="0 0 ${seglen/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${rr}" length="${seglen}"/></geometry>
+      <material name="${mat}"/>
+    </visual>
+  </xacro:macro>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${L0/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${rr*1.6}" length="${L0}"/></geometry>
+      <material name="blu"/>
+    </visual>
+  </link>
+
+  <joint name="base_yaw" type="revolute">
+    <parent link="base_link"/><child link="link_yaw"/>
+    <origin xyz="0 0 ${L0}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5708" upper="1.5708" velocity="${vL}" effort="${eL}"/>
+  </joint>
+  <link name="link_yaw"><xacro:seg seglen="${Ly}" mat="grey"/></link>
+
+  <joint name="shoulder" type="revolute">
+    <parent link="link_yaw"/><child link="link_upper"/>
+    <origin xyz="0 0 ${Ly}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5708" upper="1.5708" velocity="${vL}" effort="${eL}"/>
+  </joint>
+  <link name="link_upper"><xacro:seg seglen="${L1}" mat="grey"/></link>
+
+  <joint name="elbow" type="revolute">
+    <parent link="link_upper"/><child link="link_fore"/>
+    <origin xyz="0 ${Loff} ${L1}" rpy="0 0 0"/>  <!-- Loff = DH d2 lateral offset -->
+
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.0944" upper="2.0944" velocity="${vL}" effort="${eL}"/>
+  </joint>
+  <link name="link_fore"><xacro:seg seglen="${L2}" mat="grey"/></link>
+
+  <joint name="wrist_pitch" type="revolute">
+    <parent link="link_fore"/><child link="link_wp"/>
+    <origin xyz="0 0 ${L2}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.1416" upper="3.1416" velocity="${vL}" effort="${eL}"/>
+  </joint>
+  <link name="link_wp"><xacro:seg seglen="${L3}" mat="blu"/></link>
+
+  <joint name="wrist_roll" type="revolute">
+    <parent link="link_wp"/><child link="link_wr"/>
+    <origin xyz="0 0 ${L3}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.1416" upper="3.1416" velocity="${vL}" effort="${eL}"/>
+  </joint>
+  <link name="link_wr"><xacro:seg seglen="${L4*0.4}" mat="blu"/></link>
+
+  <joint name="tool0" type="fixed">
+    <parent link="link_wr"/><child link="cup"/>
+    <origin xyz="0 0 ${L4}" rpy="0 0 0"/>
+  </joint>
+  <link name="cup">
+    <visual>
+      <origin xyz="0 0 0.03" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.03" length="0.06"/></geometry>
+      <material name="cup"/>
+    </visual>
+  </link>
+
+</robot>
