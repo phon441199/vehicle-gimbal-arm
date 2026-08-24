@@ -1,6 +1,6 @@
 # gimbalarm_ws — 차량 외란 환경에서의 능동 진동 절연 로봇팔
 
-외란 관측기(ESO)와 관절 공간 능동 서스펜션을 적용한 5축 로봇팔 제어 워크스페이스.
+외란 관측기(ESO)와 태스크 공간 능동 서스펜션을 적용한 5축 로봇팔의 **2층 제어 구조**.
 AK40-10 QDD(어깨/팔꿈치, CAN·MIT 프로토콜)와 GM4108 짐벌모터(손목 pitch/roll, SimpleFOC)를
 Teensy 4.1 한 대에서 구동하고, micro-ROS로 ROS 2(RViz2, Tkinter GUI)와 연결한다.
 
@@ -11,24 +11,39 @@ Teensy 4.1 한 대에서 구동하고, micro-ROS로 ROS 2(RViz2, Tkinter GUI)와
 
 ## 제어 구조
 
+AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능이다. 이 프로젝트에서는 그것을
+**가장 안쪽 루프로 그대로 사용**하고, 그 위에 **두 개의 제어 층을 직접 구현**했다.
+
 ```
-[상위]  micro-ROS / ROS 2  ──  RViz2, Tkinter GUI
-           │
-[3층]  태스크 공간 능동 서스펜션 (직접 구현)
-           │
-[2층]  ESO 외란 관측기 (직접 구현)  — 손목 pitch/roll에만 적용
-           │
-[1층]  AK40 임피던스 제어(드라이버 내장, MIT 펌웨어) / GM4108 FOC+PD(직접 구현)
+[상위]       micro-ROS / ROS 2  ──  RViz2, Tkinter GUI
+                │
+[2층]        태스크 공간 능동 서스펜션      (직접 구현)  — 어깨 + 팔꿈치
+                │
+[1층]        ESO 외란 관측기               (직접 구현)  — 손목 pitch
+                │
+[안쪽 루프]   AK40 임피던스 제어 (드라이버 내장, MIT 펌웨어)
+             GM4108 FOC + PD   (직접 구현)
 ```
 
-AK40에는 ESO를 적용하지 못했다. MIT 프로토콜이 전류값을 회신하지 않아 구동 토크와
-외란 토크를 분리할 수 없기 때문이다 (자세한 내용은 [`src/teensy_firmware/`](src/teensy_firmware/) 참고).
+가장 안쪽 루프는 층수에 포함하지 않는다. AK40 쪽은 상용 드라이버에 내장된 기능이고, 손목
+짐벌모터의 FOC+PD는 직접 구현했지만 둘 다 "그 위에 얹은 제어 층"이 아닌 구동단이기 때문이다.
+
+- **1층 (ESO 외란 관측기)** — 손목 pitch 축에 적용. AK40에는 적용하지 못했는데, MIT 프로토콜이
+  전류값을 회신하지 않아 구동 토크와 외란 토크를 분리할 수 없기 때문이다. 롤 축은 구현했으나
+  발산이 확인되어 비활성화했다.
+- **2층 (태스크 공간 능동 서스펜션)** — 컵 IMU 가속도를 대역통과(0.8–8 Hz)해 평면 내 팁 변위를
+  추정하고, damped 2R 자코비안 의사역행렬로 어깨·팔꿈치 관절 보정량으로 변환해 MIT 홀드
+  설정점 위에 더한다. 임피던스 홀드만으로는 기저 진동이 팁까지 거의 그대로 전달되므로
+  (전달률 ≈ 1), 팁이 월드 좌표계에서 정지하도록 관절을 능동적으로 움직이는 방식이다.
+
+구현은 [`src/teensy_firmware/arm_microros_teensy/`](src/teensy_firmware/arm_microros_teensy/arm_microros_teensy.ino)
+한 파일에 들어 있다 (서스펜션 설계 근거는 `Active suspension` 주석 블록 참고).
 
 ## 저장소 구조
 
 ```
 src/
-├── teensy_firmware/       Teensy 4.1 최종 펌웨어 (5축 구동 + ESO + micro-ROS)
+├── teensy_firmware/       Teensy 4.1 최종 펌웨어 (2층 제어 + ESO + 서스펜션 + micro-ROS)
 ├── esp32_firmware/        이식 이전 초기 MCU 단계 (개발 기록용)
 ├── shaker_firmware/       외란 재현용 가진 장치(PlatformIO, ESP32)
 ├── gimbal_arm_controller/ ROS 2: 역기구학, 자세 제어, GUI 노드
@@ -70,13 +85,13 @@ Teensy/ESP32 펌웨어는 Arduino IDE(또는 arduino-cli)로 각 `.ino`를 빌�
 
 | 항목 | 코드 |
 | --- | --- |
-| micro-ROS 노드 미검출 — 도메인 ID 불일치 | [`src/teensy_firmware/prototypes/arm_microros_teensy`](src/teensy_firmware/prototypes/arm_microros_teensy/arm_microros_teensy.ino) |
-| 전원 재인가 시 관절각 불확정 — IMU 기반 섹터 판정 | [`src/teensy_firmware/gimbal_arm_full`](src/teensy_firmware/gimbal_arm_full/gimbal_arm_full.ino) 부팅 시퀀스 |
-| I2C 주소 변동 — AD0 핀 플로팅 | [`src/teensy_firmware/diagnostics/i2c_scanner`](src/teensy_firmware/diagnostics/i2c_scanner/i2c_scanner.ino) |
-| 전류 센서 초기화 실패 — 아날로그 채널 지정 오류 | [`src/teensy_firmware/gimbal_arm_full`](src/teensy_firmware/gimbal_arm_full/gimbal_arm_full.ino) 전류 센싱부 |
+| micro-ROS 노드 미검출 — 도메인 ID 불일치 | [`arm_microros_teensy.ino`](src/teensy_firmware/arm_microros_teensy/arm_microros_teensy.ino) — 논블로킹 ping/재접속 상태 기계 |
+| 전원 재인가 시 관절각 불확정 — IMU 기반 섹터 판정 | [`arm_microros_teensy.ino`](src/teensy_firmware/arm_microros_teensy/arm_microros_teensy.ino) — `sector snap` 부팅 시퀀스 |
+| I2C 주소 변동 — AD0 핀 플로팅 | [`diagnostics/i2c_scanner`](src/teensy_firmware/diagnostics/i2c_scanner/i2c_scanner.ino) |
+| 전류 센서 초기화 실패 — 아날로그 채널 지정 오류 | [`arm_microros_teensy.ino`](src/teensy_firmware/arm_microros_teensy/arm_microros_teensy.ino) — `WR_CS_A/B`, `WR2_CS_A/B` (A0–A3) |
 | 엔코더 SPI 미동작 — 케이블 색상 규약 불일치 | [`src/esp32_firmware/enc_imu_spi_test`](src/esp32_firmware/enc_imu_spi_test/) |
-| CAN 통신 두절 — 트랜시버 동작 전압 | [`src/teensy_firmware/prototypes/ak40_can_test`](src/teensy_firmware/prototypes/ak40_can_test/AK40_Impedance_Multi/AK40_Impedance_Multi.ino) |
-| SPI 초기화 간헐 실패 — 물리적 접촉 불량 | [`src/esp32_firmware/spi_miso_probe`](src/esp32_firmware/spi_miso_probe/), [`src/uno_imu_test`](src/uno_imu_test/uno_imu_test.ino) (IMU를 별도 보드로 분리해 원인 격리) |
+| CAN 통신 두절 — 트랜시버 동작 전압 | [`prototypes/ak40_can_test`](src/teensy_firmware/prototypes/ak40_can_test/AK40_Impedance_Multi/AK40_Impedance_Multi.ino) |
+| SPI 초기화 간헐 실패 — 물리적 접촉 불량 | [`esp32_firmware/spi_miso_probe`](src/esp32_firmware/spi_miso_probe/), [`uno_imu_test`](src/uno_imu_test/uno_imu_test.ino) (IMU를 별도 보드로 분리해 원인 격리) |
 
 세부 설명은 각 하위 폴더의 README 참고: [`teensy_firmware/README.md`](src/teensy_firmware/README.md),
 [`esp32_firmware/README.md`](src/esp32_firmware/README.md).
