@@ -51,8 +51,8 @@ scripts/                   micro-ROS agent 실행 스크립트
 워크스페이스를 받은 뒤 아래처럼 따로 받아 넣으면 된다.
 
 ```bash
-git clone https://github.com/mecanic419/gimbalarm_ws.git
-cd gimbalarm_ws/src
+git clone https://github.com/MOONCHANGI/vehicle-gimbal-arm.git
+cd vehicle-gimbal-arm/src
 git clone -b jazzy https://github.com/micro-ROS/micro-ROS-Agent.git
 git clone https://github.com/micro-ROS/micro_ros_msgs.git
 cd ..
