@@ -25,14 +25,9 @@ AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능�
              GM4108 FOC + PD   (직접 구현)
 ```
 
-- **1층 (DOB 외란 관측기)** — 손목 pitch 축에 적용. 관측기 대역폭은 기계 공진(약 9 Hz) 아래인
-  6.78 Hz로 튜닝했고(일반적인 물컵속 물의 고유진동수는 2~4Hz 부근으로 근사된다), 컵 유무에 따라 관성 J를 바꿔 입력 게인 b₀ = Kt/J를 다시 계산한다.
-- **2층 (PD 제어 기반 가변 서스펜션)** — 컵 IMU 가속도를 대역통과(0.8–8 Hz)해 평면 내 팁
-  변위·속도를 추정하고, 변위에 비례(P)·속도에 비례(D, sky-hook 감쇠)하는 관절 보정량을 만들어
-  MIT 홀드 설정점 위에 더한다. 두 게인은 런타임에 조절 가능하고(0 = 서스펜션 off), 서스펜션을
-  켤 때는 MIT kp를 120에서 30–40으로 낮춰 관절을 무르게 만든다 — 이 가변성이 "서스펜션"으로
-  동작하는 핵심이다. 임피던스 홀드만으로는 기저 진동이 팁까지 거의 그대로 전달되기 때문
-  (전달률 ≈ 1)이다. 보정량을 관절 단위로 배분할 때는 damped 2R 자코비안 의사역행렬을 쓴다.
+- **1층 (DOB 외란 관측기)** — 손목 pitch 축에 적용. 관측기 대역폭은 기계 공진(약 9 Hz에서 발생) 아래인
+  6.78 Hz로 튜닝했고(일반적인 크기의 원통형 물컵속 물의 고유진동수는 2~4Hz 부근으로 근사된다), 컵 유무에 따라 관성 J를 바꿔 입력 게인 b₀ = Kt/J를 다시 계산한다.
+- **2층 (PD 제어 기반 가변 서스펜션)** — AK40 의 MIT프로토콜을 통해 필요한 위치, 속도, Kp, Kd를 모터로 전송한다. 모터는 피드백루프로 기계적 스프링 - 댐퍼시스템과 유사하게 운동하여  물컵까지 전달되는 저주파 외란을 소산시키는 역할을 한다.
 
 구현은 [`src/teensy_firmware/arm_microros_teensy/`](src/teensy_firmware/arm_microros_teensy/arm_microros_teensy.ino)
 한 파일에 들어 있다 (서스펜션 설계 근거는 `Active suspension` 주석 블록 참고).
@@ -42,14 +37,12 @@ AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능�
 ```
 src/
 ├── teensy_firmware/       Teensy 4.1 최종 펌웨어 (2층 제어 + DOB + 서스펜션 + micro-ROS)
-├── esp32_firmware/        디버깅용 ESP32 스케치
+├── esp32_firmware/        중간중간 디버깅용으로 사용한 ESP32 스케치
 ├── shaker_firmware/       외란 재현용 가진 장치(PlatformIO, ESP32)
 ├── gimbal_arm_controller/ ROS 2: 역기구학, 자세 제어, GUI 노드
 ├── gimbalarm_description/ ROS 2: URDF, RViz 설정
 ├── gimbal_bridge/         ROS 2: 브리지 노드
 ├── imu_test_visualizer/   ROS 2: IMU 데이터 시각화
-├── micro_ros_msgs/        (미포함, 아래 "빌드" 참고)
-├── micro-ROS-Agent/       (미포함, 아래 "빌드" 참고)
 └── uno_imu_test/          IMU 단독 벤치 테스트 (버스 분리 진단용)
 scripts/                   micro-ROS agent 실행 스크립트
 ```
@@ -59,7 +52,7 @@ scripts/                   micro-ROS agent 실행 스크립트
 
 ## 트러블슈팅 ↔ 코드 매핑
 
-포트폴리오에 정리한 트러블슈팅 항목이 실제 어떤 코드에서 나온 것인지 링크한다.
+노션에 정리한 트러블슈팅 항목과 연결되는 코드들이다.
 
 | 항목 | 코드 |
 | --- | --- |
