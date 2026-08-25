@@ -25,13 +25,8 @@ AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능�
              GM4108 FOC + PD   (직접 구현)
 ```
 
-가장 안쪽 루프는 층수에 포함하지 않는다. AK40 쪽은 상용 드라이버에 내장된 기능이고, 손목
-짐벌모터의 FOC+PD는 직접 구현했지만 둘 다 "그 위에 얹은 제어 층"이 아닌 구동단이기 때문이다.
-
 - **1층 (DOB 외란 관측기)** — 손목 pitch 축에 적용. 관측기 대역폭은 기계 공진(약 9 Hz) 아래인
-  6.78 Hz로 튜닝했고, 컵 유무에 따라 관성 J를 바꿔 입력 게인 b₀ = Kt/J를 다시 계산한다.
-  AK40에는 적용하지 못했는데, MIT 프로토콜이 전류값을 회신하지 않아 구동 토크와 외란 토크를
-  분리할 수 없기 때문이다. 롤 축은 구현했으나 발산이 확인되어 비활성화했다.
+  6.78 Hz로 튜닝했고(일반적인 물컵속 물의 고유진동수는 2~4Hz 부근으로 근사된다), 컵 유무에 따라 관성 J를 바꿔 입력 게인 b₀ = Kt/J를 다시 계산한다.
 - **2층 (PD 제어 기반 가변 서스펜션)** — 컵 IMU 가속도를 대역통과(0.8–8 Hz)해 평면 내 팁
   변위·속도를 추정하고, 변위에 비례(P)·속도에 비례(D, sky-hook 감쇠)하는 관절 보정량을 만들어
   MIT 홀드 설정점 위에 더한다. 두 게인은 런타임에 조절 가능하고(0 = 서스펜션 off), 서스펜션을
@@ -61,26 +56,6 @@ scripts/                   micro-ROS agent 실행 스크립트
 
 `build/`, `install/`, `log/`는 colcon 빌드 산출물이라 git에 포함하지 않는다.
 
-## 빌드
-
-이 저장소는 `src/micro-ROS-Agent`, `src/micro_ros_msgs`를 포함하지 않는다. 둘 다 본인 작성 코드가
-아니라 micro-ROS 프로젝트의 표준 패키지([micro-ROS-Agent](https://github.com/micro-ROS/micro-ROS-Agent),
-[micro_ros_msgs](https://github.com/micro-ROS/micro_ros_msgs))를 그대로 사용한 것이라 벤더링하지 않았다.
-워크스페이스를 받은 뒤 아래처럼 따로 받아 넣으면 된다.
-
-```bash
-git clone https://github.com/phon441199/vehicle-gimbal-arm.git
-cd vehicle-gimbal-arm/src
-git clone -b jazzy https://github.com/micro-ROS/micro-ROS-Agent.git
-git clone https://github.com/micro-ROS/micro_ros_msgs.git
-cd ..
-colcon build
-source install/setup.bash
-ros2 launch micro_ros_agent micro_ros_agent.launch.py   # 또는 scripts/start_microros_agent.sh
-```
-
-Teensy/ESP32 펌웨어는 Arduino IDE(또는 arduino-cli)로 각 `.ino`를 빌드/업로드한다.
-`shaker_firmware`는 PlatformIO 프로젝트 (`pio run -t upload`).
 
 ## 트러블슈팅 ↔ 코드 매핑
 
