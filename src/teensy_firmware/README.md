@@ -1,6 +1,6 @@
 # Teensy 4.1 펌웨어
 
-ESP32(LOLIN D32)에서 이식한 최종 MCU. AK40-10 QDD ×2(CAN, MIT 프로토콜),
+메인 제어 MCU. AK40-10 QDD ×2(CAN, MIT 프로토콜),
 GM4108 짐벌모터 ×2(SimpleFOC), IMU/엔코더(SPI, I2C), micro-ROS를 이 한 보드에서 구동한다.
 
 | 폴더 | 내용 |
@@ -44,5 +44,5 @@ AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능�
 그보다 더 이른 초기 버전이다. 둘 다 개발 과정 기록용으로만 남겨두었고, 실제 최종 동작 버전은
 [`arm_microros_teensy/`](arm_microros_teensy/arm_microros_teensy.ino)다.
 
-파일 헤더 주석에 `arm_microros_esp32.ino`로 적혀 있는 것은 ESP32 원본에서 이식하며 남은
-흔적으로, 실제로는 Teensy 4.1 빌드다 (같은 주석 블록 하단 `PLATFORM:` 항목 참고).
+최종 펌웨어 헤더 주석 첫 줄이 `arm_microros_esp32.ino`로 남아 있으나 실제로는 Teensy 4.1
+빌드다 (같은 주석 블록의 `PLATFORM:` 항목 참고).

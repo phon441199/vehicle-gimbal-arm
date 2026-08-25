@@ -42,7 +42,7 @@ AK40의 임피던스 제어는 드라이버 펌웨어(MIT)에 내장된 기능�
 ```
 src/
 ├── teensy_firmware/       Teensy 4.1 최종 펌웨어 (2층 제어 + DOB + 서스펜션 + micro-ROS)
-├── esp32_firmware/        이식 이전 초기 MCU 단계 (개발 기록용)
+├── esp32_firmware/        디버깅용 ESP32 스케치
 ├── shaker_firmware/       외란 재현용 가진 장치(PlatformIO, ESP32)
 ├── gimbal_arm_controller/ ROS 2: 역기구학, 자세 제어, GUI 노드
 ├── gimbalarm_description/ ROS 2: URDF, RViz 설정
